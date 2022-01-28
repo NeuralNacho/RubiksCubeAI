@@ -107,3 +107,5 @@ class Cube:
         self.left_face[:,0] = self.front_face[-1]
         self.front_face[-1] = self.right_face[:,-1][::-1]
         self.right_face[:,-1] = temp
+
+# github test2
