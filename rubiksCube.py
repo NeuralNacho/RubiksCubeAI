@@ -1,11 +1,11 @@
 import numpy as np
 from tkinter import *
-import Cube
+from Cube import *
 
 class Window(Tk):
     def __init__(self):
         super().__init__()
-        self.cube = Cube.Cube(2)
+        self.cube = Cube(2)
         self.title("Rubik's Cube")
         self.geometry('500x400+700+100')
         self.resizable(True, True)
