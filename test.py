@@ -1,8 +1,7 @@
 import numpy as np
+import tensorflow as tf
 from Cube import *
+from environment import *
 
-cube = Cube(2)
-state = np.array([cube.up_face, cube.down_face, cube.front_face,
-                        cube.back_face, cube.right_face, cube.left_face], 
-                        dtype = np.uint8)
-print(np.rot90(state, k = 1, axes = (1,2)))
+model = build_dqn(0.001, 12, (6,2,2))
+print(model.summary())
