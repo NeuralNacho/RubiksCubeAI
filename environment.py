@@ -5,6 +5,7 @@ from tkinter import *
 from Cube import *
 from RenderEnv import *
 from tensorflow import keras
+import tensorflow as tf
 
 
 class CubeEnv(gym.Env):  # child of gym.Env
@@ -29,7 +30,7 @@ class CubeEnv(gym.Env):  # child of gym.Env
                         }
         # each rotation is a number from 0 to 11
         self.observation_space = gym.spaces.Box(low = 0, high = 5, 
-                                                shape = (6, self.dim, self.dim), dtype = np.uint8)
+                                                shape = (6, self.dim, self.dim), dtype = np.int32)
         # Cube represented as a 6x3x3 tensor (or 6x2x2 for 2x2 cube)
         self.state = self.get_state()
         self.solved_states = []
@@ -69,7 +70,7 @@ class CubeEnv(gym.Env):  # child of gym.Env
     def get_state(self):
         return np.array([self.cube.up_face, self.cube.down_face, self.cube.front_face,
                         self.cube.back_face, self.cube.right_face, self.cube.left_face], 
-                        dtype = np.uint8)
+                        dtype = np.int32)
         # represent 3 dimensional tensor with numpy -  since documentation uses np
         # Can we use tensorflow tensor instead?
 
@@ -79,7 +80,7 @@ class CubeEnv(gym.Env):  # child of gym.Env
         reward = -1  # any rotation has a negative reward value
         done = False
         for solved_state in self.solved_states:
-            if np.array_equal(self.state, solved_state):  # WHAT ABOUT 2x2 WHERE CENTRE's NOT FIXED
+            if np.array_equal(self.state, solved_state): 
                 done = True
         info = {}
         # self.render()
@@ -97,6 +98,7 @@ class CubeEnv(gym.Env):  # child of gym.Env
             action = np.random.choice(self.action_space.n)
             self.action_dict[action]()
         self.state = self.get_state()
+        return self.state
 
 
 def build_dqn(learning_rate, actions_output, input_shape):
@@ -146,17 +148,18 @@ class ExperienceReplay():
 
     def get_sample(self, batch_size):
         indices = np.random.choice(range(len(self.done_memory)), size = batch_size)
-        state_sample = np.array([self.state_memory[i] for i in indices])
-        new_state_sample = np.array([self.new_state_memory[i] for i in indices])
+        state_sample = np.array([self.state_memory[i] for i in indices], dtype = np.int32)
+        new_state_sample = np.array([self.new_state_memory[i] for i in indices], dtype = np.int32)
         # two arrays above are numpy arrays since the will be passed into the dqn save_model
         action_sample = [self.action_memory[i] for i in indices]
-        done_sample = [self.done_memory[i] for i in indices]
+        done_sample = np.array([self.done_memory[i] for i in indices], np.int32)  # actually needs to be np array for calculation later
         return state_sample, new_state_sample, action_sample, done_sample
 
 
+# Could have just used DQNAgent from keras-rl module which has the inbuilt train method!
 class Agent():
     def __init__(self, learning_rate, gamma, action_space_size, epsilon, input_shape, batch_size, 
-                min_epsilon = 0.05, max_memory_size = 100000, update_target_network = 1000):
+                min_epsilon = 0.05, max_memory_size = 100000, update_target_network = 200):
         # gamma is the reward loss in the formula for the Q value
         # action_space_size is 12 for 12 quarter rotations defined in the environment
         # epsilon for epsilon greedy choice of actions. won't go below min_epsilon when later decrementing it
@@ -170,6 +173,7 @@ class Agent():
         self.batch_size = batch_size
         self.update_target_network = update_target_network
         self.reward_sample = [-1 for i in range(self.batch_size)]  # put it here so it doesn't have to be loaded up every time we learn
+        self.target_updater = 0  # used to determine when the target network should be updated
 
         self.memory = ExperienceReplay(max_memory_size, input_shape, action_space_size)
         self.q_val_net = build_dqn(learning_rate, action_space_size, input_shape)
@@ -183,22 +187,23 @@ class Agent():
             action = np.argmax(actions)
         return action
 
-    def store_transition(self, state, action, new_state, done):
-        self.memory.store_transition(state, action, new_state, done)
+    def store_transition(self, state, new_state, action, done):
+        self.memory.store_transition(state, new_state, action, done)
 
     def learn(self):
+        self.target_updater += 1
         if len(self.memory.done_memory) > self.batch_size:
             state_sample, new_state_sample, action_sample, done_sample = self.memory.get_sample(self.batch_size)
-
-            new_state_target_eval = self.q_target_net.predict(new_state_sample)
-
-            current_state_eval = self.q_val_net.predict(state_sample)
+            new_state_target_eval = self.q_target_net.predict(new_state_sample, batch_size = self.batch_size)  # need batch_size to format data for model
+            
+            current_state_eval = self.q_val_net.predict(state_sample, batch_size = self.batch_size)
+            
             target_eval = current_state_eval
 
             batch_index = np.arange(self.batch_size, dtype = np.int32)
-            target_eval[batch_index, action_sample] = self.rewards_sample + \
-                                            self.gamma * np.max(new_state_target_eval, axis = 1) * (1- done_sample) 
-            # applying formula for Q values
+            target_eval[batch_index, action_sample] = self.reward_sample + \
+                                            self.gamma * np.max(new_state_target_eval, axis = 1) * (done_sample - 1)  # if done then target is larger
+            # applying formula for Q values - updating reward for action the agent actually took
             # [batch_index, action_sample] are the indexes that we want to change. They are the actions the target network takes
             # we only change these ones so that the network only optimizes in their direction
             
@@ -209,8 +214,9 @@ class Agent():
             self.epsilon = max(self.epsilon, self.epsilon_min)
             # updating epsilon
 
-            if self.action_counter % self.update_target_network == 0:
-                self.q_target_net.set_weights(self.q_val_net.model.get_weights())
+            if self.target_updater % self.update_target_network == 0:
+                self.q_target_net.set_weights(self.q_val_net.get_weights())
+                self.target_updater = 0
                 # setting target network equal to value network
 
     def save_model(self):

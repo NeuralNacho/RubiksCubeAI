@@ -1,11 +1,11 @@
 import numpy as np
 from tkinter import *
-from Cube import *
+import Cube
 
 class Window(Tk):
     def __init__(self):
         super().__init__()
-        self.cube = Cube(2)
+        self.cube = Cube.Cube(2)
         self.title("Rubik's Cube")
         self.geometry('500x400+700+100')
         self.resizable(True, True)
@@ -26,7 +26,7 @@ class Window(Tk):
         self.bind('R', lambda event: self.update_cube(self.cube.anticlockwise_right))
         self.bind('F', lambda event: self.update_cube(self.cube.anticlockwise_front))
         self.bind('B', lambda event: self.update_cube(self.cube.anticlockwise_back))
-        self.bind('<Configure>', lambda event: self.on_resize())
+        self.bind('<Configure>', lambda: self.on_resize())
     
     def draw_cube(self):
         self.draw_face(self.cube.left_face, [self.face_size, 2 * self.face_size])
